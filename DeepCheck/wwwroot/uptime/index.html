@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DeepCheck</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@9.0.6/dist/browser/signalr.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1724;
+      --card: #0b1220;
+      --muted: #94a3b8;
+      --accent: #2563eb;
+      --ok: #22c55e;
+      --fail: #ef4444;
+      --never: #64748b;
+      --glass: rgba(255, 255, 255, 0.04);
+      --glass-2: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Page layout */
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: radial-gradient(1200px 600px at 10% 10%, rgba(37, 99, 235, 0.08), transparent 6%),
+        linear-gradient(180deg, var(--bg) 0%, #071021 100%);
+      color: #e6eef8;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 28px auto;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+
+    /* Header */
+    header.appbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
+      width: 46px;
+      height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      box-shadow: 0 6px 22px rgba(37, 99, 235, 0.15), inset 0 -6px 18px rgba(255, 255, 255, 0.02);
+      font-weight: 700;
+      color: white;
+      font-size: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -0.2px;
+      color: #eaf2ff;
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Status badge */
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      box-shadow: 0 4px 18px rgba(2, 6, 23, 0.6);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: 0 6px 18px rgba(2, 6, 23, 0.6);
+      border: 2px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .status-dot.ok {
+      background: var(--ok);
+      box-shadow: 0 6px 22px rgba(34, 197, 94, 0.12);
+    }
+
+    .status-dot.fail {
+      background: var(--fail);
+      box-shadow: 0 6px 22px rgba(239, 68, 68, 0.12);
+    }
+
+    .status-dot.disc {
+      background: var(--muted);
+      box-shadow: 0 6px 22px rgba(100, 116, 139, 0.06);
+    }
+
+    /* Layout grid */
+    .grid {
+      display: grid;
+      /* single-column layout: right column will always sit below main content */
+      grid-template-columns: 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    /* Card */
+    .card {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      box-shadow: 0 10px 30px rgba(2, 6, 23, 0.6);
+      /* ensure cards can shrink inside grid columns (prevents overflow) */
+      min-width: 0;
+    }
+
+    /* Test-run card */
+    .test-run {
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.01));
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .test-run h2 {
+      margin: 0 0 6px 0;
+      font-size: 16px;
+      color: #f6fbff;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .test-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px;
+      border-radius: 8px;
+      background: linear-gradient(180deg, var(--glass), var(--glass-2));
+      /* allow elements inside a step to wrap to next line instead of forcing horizontal scroll */
+      flex-wrap: wrap;
+    }
+
+    .info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .name {
+      font-weight: 600;
+      color: #ecf5ff;
+      margin-bottom: 4px;
+    }
+
+    .desc {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .latency {
+      color: var(--muted);
+      font-size: 12px;
+      margin-right: 8px;
+      white-space: nowrap;
+    }
+
+    .dots {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      display: inline-block;
+      margin: 2px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      transition: transform 160ms ease, box-shadow 220ms ease, opacity 200ms ease;
+    }
+
+    .dot.ok {
+      background: var(--ok);
+    }
+
+    .dot.fail {
+      background: var(--fail);
+    }
+
+    .dot.never {
+      background: var(--never);
+      opacity: 0.9;
+    }
+
+    /* Stale runs (older than 5 minutes) appear muted/gray */
+    .dot.stale {
+      /* slightly desaturated / muted look */
+      background: rgba(255, 255, 255, 0.08);
+      opacity: 0.55;
+      box-shadow: none;
+      filter: grayscale(80%);
+    }
+
+    .dot.new {
+      animation: pop 1s cubic-bezier(.18, .9, .24, 1);
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.6);
+      transform-origin: center;
+    }
+
+    @keyframes pop {
+      0% {
+        transform: scale(0.3);
+        opacity: 0;
+        filter: blur(0.6px)
+      }
+
+      30% {
+        transform: scale(1.9);
+        opacity: 1;
+        filter: blur(0)
+      }
+
+      60% {
+        transform: scale(1.08)
+      }
+
+      100% {
+        transform: scale(1)
+      }
+    }
+
+    /* Right column (log & legend) */
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .log {
+      max-height: 420px;
+      overflow: auto;
+      padding: 0;
+      margin: 0;
+    }
+
+    .log li {
+      list-style: none;
+      padding: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 13px;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+
+    .legend .item {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 8px;
+      background: rgba(255, 255, 255, 0.01);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.02);
+    }
+
+    .app-version {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Responsive */
+    @media (max-width:980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .right-col {
+        order: 2;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header class="appbar">
+      <div class="brand">
+        <div class="logo">DC</div>
+        <div>
+          <h1>DeepCheck — Uptime</h1>
+          <div class="meta-row">
+            <div class="app-version" id="app-version">Loading app version…</div>
+            <div style="opacity:0.6">•</div>
+            <div style="color:var(--muted)">Live updates via SignalR</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-badge" id="status-badge">
+        <div id="status-dot" class="status-dot disc" aria-hidden="true"></div>
+        <div id="status">Connecting…</div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- Left: content -->
+      <div>
+        <div id="content" class="card" aria-live="polite"></div>
+      </div>
+
+      <!-- Right: log + legend -->
+      <aside class="right-col">
+        <div class="card">
+          <div style="font-weight:700;margin-bottom:8px">Legend</div>
+          <div class="legend">
+            <div class="item"><span class="dot ok" style="width:14px;height:14px;border-radius:4px"></span> OK</div>
+            <div class="item"><span class="dot fail" style="width:14px;height:14px;border-radius:4px"></span> Fail</div>
+            <div class="item"><span class="dot never" style="width:14px;height:14px;border-radius:4px"></span> Never run
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700;color:#f6fbff">Event log</div>
+            <div style="font-size:12px;color:var(--muted)">last {20} entries</div>
+          </div>
+          <ul id="log" class="log"></ul>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const statusEl = document.getElementById('status');
+      const statusDot = document.getElementById('status-dot');
+      const log = document.getElementById('log');
+      const content = document.getElementById('content');
+      const appVersionEl = document.getElementById('app-version');
+      const MAX_LOG_ITEMS = 20;
+
+      function setStatus(text, kind) {
+        statusEl.textContent = text;
+        statusDot.classList.remove('ok', 'fail', 'disc');
+        if (kind === 'ok') statusDot.classList.add('ok');
+        else if (kind === 'fail') statusDot.classList.add('fail');
+        else statusDot.classList.add('disc');
+      }
+
+      function addLog(text) {
+        const li = document.createElement('li');
+        li.textContent = text;
+        log.prepend(li);
+        // truncate old entries beyond MAX_LOG_ITEMS
+        while (log.children.length > MAX_LOG_ITEMS) {
+          log.removeChild(log.lastChild);
+        }
+      }
+
+      function createDotFromRun(run) {
+        const status = run.status || '';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        const s = (typeof status === 'string') ? status.toLowerCase() : String(status).toLowerCase();
+        if (s === 'ok') dot.classList.add('ok');
+        else if (s === 'neverrun' || s === 'never') dot.classList.add('never');
+        else dot.classList.add('fail');
+
+        const started = run.startedAt;
+        if (started) {
+          try {
+            const d = new Date(started);
+            dot.title = `${d.toLocaleString()} — ${status} — ${run.elapsedMs} ms.`;
+
+            // mark as stale if older than 5 minutes
+            const STALE_MS = 5 * 60 * 1000; // 5 minutes
+            if (!isNaN(d.getTime()) && d.getTime() < Date.now() - STALE_MS) {
+              dot.classList.add('stale');
+              // make stale status visible in tooltip as well
+              dot.title += ' — stale';
+            }
+          } catch (e) {
+            dot.title = status;
+          }
+        } else {
+          dot.title = status;
+        }
+
+        return dot;
+      }
+
+      // Helper to produce a small stable key for a run to detect "new" arrivals.
+      function runKey(run) {
+        if (!run) return '';
+        // prefer id when available, otherwise startedAt + status
+        const idPart = (run.id !== undefined && run.id !== null) ? String(run.id) : (run.startedAt || '');
+        const statusPart = run.status || '';
+        return idPart + '|' + statusPart;
+      }
+
+      async function loadDeepCheckInfo() {
+        try {
+          const res = await fetch('/api/deepcheck', { cache: 'no-store' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          renderDeepCheckInfo(data);
+          setStatus('Connected', 'ok');
+        } catch (err) {
+          setStatus('Disconnected', 'disc');
+          addLog('API load error: ' + err);
+          console.error(err);
+        }
+      }
+
+      function renderDeepCheckInfo(data) {
+        const defs = data.testRunDefinitions || [];
+        const uptime = data.uptimeTestRunInfo || {};
+        const stepsMap = uptime.steps || {};
+
+        const appVersion = data.appVersion || {};
+        const productVersion = appVersion.productVersion || '';
+        const fileVersion = appVersion.fileVersion || '';
+        appVersionEl.textContent = `Product: ${productVersion} — File: ${fileVersion}`;
+
+        // Clear previous content
+        content.innerHTML = '';
+
+        defs.forEach(testDef => {
+          const testName = testDef.testName || '';
+          const testDescription = testDef.description || '';
+          const cron = testDef.cronExpression || '';
+
+          const container = document.createElement('div');
+          container.className = 'test-run';
+
+          const h2 = document.createElement('h2');
+          h2.textContent = testName;
+          container.appendChild(h2);
+
+          if (testDescription) {
+            const pdesc = document.createElement('div');
+            pdesc.className = 'meta';
+            pdesc.textContent = testDescription;
+            container.appendChild(pdesc);
+          }
+
+          if (cron) {
+            const pcron = document.createElement('div');
+            pcron.className = 'meta';
+            pcron.textContent = 'Cron: ' + cron;
+            container.appendChild(pcron);
+          }
+
+          const stepsEl = document.createElement('div');
+          stepsEl.className = 'test-steps';
+
+          const steps = testDef.steps || [];
+          steps.forEach(stepDef => {
+            const stepName = stepDef.testStepName || '';
+            const stepDesc = stepDef.description || '';
+            const latency = stepDef.latencyCriteria;
+
+            const stepEl = document.createElement('div');
+            stepEl.className = 'step';
+
+            const info = document.createElement('div');
+            info.className = 'info';
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'name';
+            nameEl.textContent = stepName;
+            info.appendChild(nameEl);
+
+            if (stepDesc) {
+              const descEl = document.createElement('div');
+              descEl.className = 'desc';
+              descEl.textContent = stepDesc;
+              info.appendChild(descEl);
+            }
+
+            stepEl.appendChild(info);
+
+            const right = document.createElement('div');
+            right.style.display = 'flex';
+            right.style.alignItems = 'center';
+
+            if (latency !== null && latency !== undefined) {
+              const latencyEl = document.createElement('div');
+              latencyEl.className = 'latency';
+              latencyEl.textContent = `Latency: ${latency} ms`;
+              right.appendChild(latencyEl);
+            }
+
+            const dotsContainer = document.createElement('div');
+            dotsContainer.className = 'dots';
+            dotsContainer.dataset.stepName = stepName;
+
+            const runs = stepsMap[stepName] || [];
+            const limited = Array.isArray(runs) ? runs.slice(0, 10) : [];
+
+            limited.forEach(run => {
+              dotsContainer.appendChild(createDotFromRun(run));
+            });
+
+            right.appendChild(dotsContainer);
+            stepEl.appendChild(right);
+
+            stepsEl.appendChild(stepEl);
+          });
+
+          container.appendChild(stepsEl);
+          content.appendChild(container);
+        });
+
+        // store current state for incremental updates
+        window.__deepcheck_defs = defs;
+        window.__deepcheck_stepsMap = stepsMap;
+        // initialize last-seen keys per step so initial render does not animate as "new"
+        window.__deepcheck_lastSeen = window.__deepcheck_lastSeen || {};
+        Object.keys(stepsMap).forEach(stepName => {
+          const runs = Array.isArray(stepsMap[stepName]) ? stepsMap[stepName] : [];
+          if (runs.length > 0) {
+            window.__deepcheck_lastSeen[stepName] = runKey(runs[0]);
+          } else {
+            window.__deepcheck_lastSeen[stepName] = '';
+          }
+        });
+      }
+
+      // initial load
+      loadDeepCheckInfo();
+
+      // also keep the signalR connection for live updates (existing behaviour)
+      const connection = new signalR.HubConnectionBuilder()
+        .withUrl('/uptime-hub')
+        .withAutomaticReconnect()
+        .build();
+
+      // SignalR lifecycle status hooks
+      connection.onreconnecting(function (err) {
+        setStatus('Reconnecting…', 'disc');
+        addLog('SignalR reconnecting' + (err ? ': ' + err : ''));
+      });
+      connection.onreconnected(function (connectionId) {
+        setStatus('Connected', 'ok');
+        addLog('SignalR reconnected' + (connectionId ? ' — ' + connectionId : ''));
+      });
+      connection.onclose(function (err) {
+        setStatus('Disconnected', 'disc');
+        addLog('SignalR connection closed' + (err ? ': ' + err : ''));
+      });
+      connection.on('CheckResult', function (payload) {
+        addLog(new Date().toLocaleString() + ' — ' + JSON.stringify(payload));
+        setStatus('Connected', 'ok');
+
+        // Process incremental update without re-fetching
+        try {
+          processTestRunInfo(payload);
+        } catch (e) {
+          console.error('Error processing CheckResult payload', e);
+        }
+      });
+
+      connection.start().then(function () { setStatus('Connected', 'ok'); })
+        .catch(function (err) {
+          setStatus('Disconnected', 'disc');
+          addLog('Connection error: ' + err);
+          console.error(err);
+        });
+
+      window.addEventListener('beforeunload', function () { connection.stop(); });
+
+      // ----- incremental update helpers -----
+      function processTestRunInfo(runInfo) {
+        if (!runInfo || !Array.isArray(runInfo.steps)) return;
+
+        if (!window.__deepcheck_stepsMap) {
+          window.__deepcheck_stepsMap = {};
+        }
+        const stepsMap = window.__deepcheck_stepsMap;
+
+        runInfo.steps.forEach(stepRun => {
+          // stepRun may contain testStepDefinition with testStepName
+          const stepName =
+            (stepRun.testStepDefinition && stepRun.testStepDefinition.testStepName) ||
+            stepRun.testStepName;
+
+          if (!stepName) return;
+
+          if (!Array.isArray(stepsMap[stepName])) stepsMap[stepName] = [];
+
+          // Prepend newest run; keep maximal 10
+          stepsMap[stepName].unshift(stepRun);
+          if (stepsMap[stepName].length > 10) stepsMap[stepName].length = 10;
+
+          renderDotsForStep(stepName);
+        });
+      }
+
+      function renderDotsForStep(stepName) {
+        const stepsMap = window.__deepcheck_stepsMap || {};
+        const runs = stepsMap[stepName] || [];
+        const dotsEls = Array.from(document.querySelectorAll('.dots')).filter(el => el.dataset.stepName === stepName);
+        if (dotsEls.length === 0) return;
+        const limited = Array.isArray(runs) ? runs.slice(0, 10) : [];
+
+        // detect whether the newest run changed since last render
+        const latest = limited[0];
+        const latestKey = runKey(latest);
+        const lastSeen = (window.__deepcheck_lastSeen && window.__deepcheck_lastSeen[stepName]) || '';
+        const shouldAnimateNewest = latestKey && latestKey !== lastSeen;
+        // update last seen immediately to avoid double animations for the same run
+        window.__deepcheck_lastSeen = window.__deepcheck_lastSeen || {};
+        window.__deepcheck_lastSeen[stepName] = latestKey;
+
+        dotsEls.forEach(dotsContainer => {
+          // rebuild dots list (keeps DOM simple)
+          dotsContainer.innerHTML = '';
+          limited.forEach((run, idx) => {
+            const dot = createDotFromRun(run);
+            // if this is the newest and should animate, add the class and remove it after animation
+            if (idx === 0 && shouldAnimateNewest) {
+              dot.classList.add('new');
+              // ensure the class is removed after animation so future arrivals animate again
+              const removeNew = () => {
+                dot.classList.remove('new');
+                dot.removeEventListener('animationend', removeNew);
+                dot.removeEventListener('transitionend', removeNew);
+              };
+              dot.addEventListener('animationend', removeNew);
+              // fallback in case animationend doesn't fire (match CSS duration + margin)
+              setTimeout(removeNew, 1400);
+            }
+            dotsContainer.appendChild(dot);
+          });
+        });
+      }
+
+    })();
+  </script>
+</body>
+
+</html>

@@ -78,7 +78,7 @@ services.AddSignalR();
 
 services.AddSingleton<ITest, WsUserLoginAndMarketOverview>();
 services.AddSingleton<ITest, TtwsResponsivenessCheck>();
-services.AddSingleton<ITest, PushTestJob>();
+// services.AddSingleton<ITest, PushTestJob>();
 
 services.AddScoped<ITestRepository, TestRepository>();
 services.AddScoped<ITestRunService, TestRunService>();

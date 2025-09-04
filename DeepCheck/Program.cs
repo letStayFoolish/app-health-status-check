@@ -17,6 +17,7 @@ using DeepCheck.Services.JobCleanup;
 using DeepCheck.Services.Ttws;
 using Serilog.Logfmt;
 using DeepCheck.Hubs;
+using DeepCheck.Services.User;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -84,6 +85,7 @@ services.AddScoped<ITestRepository, TestRepository>();
 services.AddScoped<ITestRunService, TestRunService>();
 services.AddScoped<IDeepCheckInfoService, DeepCheckInfoService>();
 services.AddScoped<IJobCleanupService, JobCleanupService>();
+services.AddScoped<IUserService, UserService>();
 services.AddSingleton<IBrowserProvider, BrowserProvider>();
 services.AddSingleton<IPuppeteerService, PuppeteerService>();
 // services.AddSingleton<IJobCleanupService, JobCleanupService>();

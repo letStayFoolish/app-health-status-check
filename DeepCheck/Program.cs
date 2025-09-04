@@ -119,7 +119,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseExceptionHandler();
-
+app.UseStatusCodePages();
 app.UseSerilogRequestLogging(); // Logs requests
 
 if (app.Environment.IsDevelopment())

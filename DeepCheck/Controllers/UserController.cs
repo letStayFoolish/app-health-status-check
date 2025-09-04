@@ -24,6 +24,10 @@ public class UserController : ControllerBase
         try
         {
             var response = await this.userService.GetUserAsync(cancellationToken);
+            if (response is null)
+            {
+                return NotFound();
+            }
 
             return Ok(response);
         }

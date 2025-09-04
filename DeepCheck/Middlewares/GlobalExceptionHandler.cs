@@ -30,12 +30,18 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception,
         CancellationToken cancellationToken = default)
     {
+        // 1. Log with corellation
+        this._logger.LogError(exception, "Unhandled exception. TraceId: {TraceId}", Activity.Current.Id ?? httpContext.TraceIdentifier);;
+
+        // 2. Map exception to ProblemDetails
         var (status, title, detail, extensions) = MapException(exception, httpContext);
 
+        // 3. Build ProblemDetails (don't leak internals in production)
         var problem = new ProblemDetails
         {
             Status = status,
             Title = title,
+            Type = exception.GetType().FullName,
             Detail = _env.IsDevelopment() ? detail : null, // avoid leaking internals in production
             Instance = httpContext.Request.Path
         };
@@ -48,6 +54,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 problem.Extensions[kvp.Key] = kvp.Value;
 
         httpContext.Response.StatusCode = status;
+
+        problem.Extensions["timestamp"] = DateTime.UtcNow;
 
         // Log by severity (4xx => Warning, 5xx => Error)
         if (status is >= 500)

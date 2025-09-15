@@ -1,5 +1,7 @@
 namespace DeepCheck.Services.User;
 
+using Helpers;
+
 public class UserService : IUserService
 {
     private readonly bool hasError = true;
@@ -15,7 +17,10 @@ public class UserService : IUserService
 
 public class UserServiceException : Exception
 {
+    // Example when not to use DI
+    private int ErrCode { get; } = RandomNumberGenerator.GetRandomNumber();
     public UserServiceException(string message) : base(message)
     {
+        var code = ErrCode;
     }
 }

@@ -64,4 +64,9 @@ public class TestRunService : ITestRunService
   {
       return await this._testRepository.GetLastStepAsync(testName, stepName, cancellationToken);
   }
+
+  public async Task<IEnumerable<FailedTestInfo>> GetFailedTestRunsAsync(CancellationToken cancellationToken = default)
+  {
+      return await this._testRepository.GetFailedTestRunsAsync(cancellationToken);
+  }
 }

@@ -11,5 +11,9 @@ public class JobCleanupService : IJobCleanupService
         _testRepository = testRepository;
     }
 
-    public async Task CleanupAsync(DateTime olderThan) => await _testRepository.RemoveOldTestRunsAsync(olderThan);
+    public async Task CleanupAsync(DateTime successfulTestsOlderThan, DateTime failedTestsOlderThan)
+    {
+        await _testRepository.RemoveOldSuccessfulTestRunsAsync(successfulTestsOlderThan);
+        await _testRepository.RemoveOldFailedTestRunsAsync(failedTestsOlderThan);
+    }
 }

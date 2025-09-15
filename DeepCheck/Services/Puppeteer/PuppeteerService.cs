@@ -1,9 +1,6 @@
-﻿using System.Diagnostics;
-using System.Globalization;
-using System.Runtime.CompilerServices;
+﻿using System.Globalization;
 using DeepCheck.DTOs;
 using DeepCheck.Helpers;
-using DeepCheck.Interfaces;
 using DeepCheck.Models;
 using Microsoft.Extensions.Options;
 using PuppeteerSharp;
@@ -33,14 +30,15 @@ public sealed class PuppeteerService : IPuppeteerService
 
     private readonly IBrowserProvider _browserProvider;
     private readonly ILogger<PuppeteerService> _logger;
-    private readonly IHostEnvironment env;
+    private readonly IHostEnvironment _env;
     private readonly WsChecksSettings _settings;
 
-    public PuppeteerService(IBrowserProvider browserProvider, ILogger<PuppeteerService> logger, IOptions<WsChecksSettings> config, IHostEnvironment env)
+    public PuppeteerService(IBrowserProvider browserProvider, ILogger<PuppeteerService> logger,
+        IOptions<WsChecksSettings> config, IHostEnvironment env)
     {
         _browserProvider = browserProvider;
         _logger = logger;
-        this.env = env;
+        _env = env;
         _settings = config.Value;
     }
 
@@ -54,17 +52,16 @@ public sealed class PuppeteerService : IPuppeteerService
 
         // Create an isolated context per operation
         var context = await browser.CreateBrowserContextAsync();
-        using var page = await context.NewPageAsync();
-
+        await using var page = await context.NewPageAsync();
         try
         {
             await ConfigurePage(page, ct);
             //// LOGIN PROCESS
             // Step 1: Go to the home page and login
             await GoToAsync(page, "https://wealth.baha.com/equities/overview", ct);
-            var userInput = await WaitForSelectorAsync(page, UsernameSelector, ct);
-            var passInput = await WaitForSelectorAsync(page, PasswordSelector, ct);
-            var loginBtn = await WaitForSelectorAsync(page, LoginButtonSelector, ct);
+            await using var userInput = await WaitForSelectorAsync(page, UsernameSelector, ct);
+            await using var passInput = await WaitForSelectorAsync(page, PasswordSelector, ct);
+            await using var loginBtn = await WaitForSelectorAsync(page, LoginButtonSelector, ct);
 
             await userInput.ClickAsync();
             await userInput.TypeAsync(_settings.Username);
@@ -74,13 +71,15 @@ public sealed class PuppeteerService : IPuppeteerService
             testRunBuilder.StartNextStep();
 
             await loginBtn.ClickAsync();
-            await WaitForSelectorAsync(page, LoggedInMarkerSelector, ct);
+            await WaitForSelectorToShowAsync(page, LoggedInMarkerSelector, ct);
 
             testRunBuilder.StepDone();
 
             // Optional take screenshot
-            await ScreenshotAsync(page, "login", ct);
-
+            if (this._env.IsDevelopment())
+            {
+                await this.TakeScreenshotAsync(page, "login", ct);
+            }
 
             //// MARKET OVERVIEW
             // Step 2: Navigate to market overview (same page/context to keep session)
@@ -90,19 +89,33 @@ public sealed class PuppeteerService : IPuppeteerService
             var passedTestsCount = await MarketOverviewReadyAsync(page, 5, ct);
             if (passedTestsCount < 5)
             {
-                throw new DomainException($"Market overview not loaded. Expected at least 5 rows, got {passedTestsCount}.");
+                throw new DomainException(
+                    $"Market overview not loaded. Expected at least 5 rows, got {passedTestsCount}.");
             }
+
             testRunBuilder.StepDone();
 
             // Optional take screenshot
-            await ScreenshotAsync(page, "mop", ct);
+            if (this._env.IsDevelopment())
+            {
+                await this.TakeScreenshotAsync(page, "mop", ct);
+            }
         }
         catch (Exception ex)
         {
-            await ScreenshotAsync(page, "error", ct);
+            if (this._env.IsProduction() && this._env.IsDevelopment())
+            {
+                await this.TakeScreenshotAsync(page, "error", ct);
+            }
+
             _logger.LogError(ex, "Test run {Name} failed.", testDefinition.TestName);
             testRunBuilder.FailStep(ex.Message);
         }
+        finally
+        {
+            await context.CloseAsync();
+        }
+
         return testRunBuilder.FinishTest();
     }
 
@@ -119,8 +132,7 @@ public sealed class PuppeteerService : IPuppeteerService
     {
         var navOptions = new NavigationOptions
         {
-            Timeout = Timeout,
-            WaitUntil = [WaitUntilNavigation.Networkidle0] // wait until the page is "quiet"
+            Timeout = Timeout, WaitUntil = [WaitUntilNavigation.Networkidle0] // wait until the page is "quiet"
         };
 
         var response = await page.GoToAsync(url, navOptions);
@@ -130,11 +142,8 @@ public sealed class PuppeteerService : IPuppeteerService
 
     private static async Task<IElementHandle> WaitForSelectorAsync(IPage page, string selector, CancellationToken ct)
     {
-        var handle = await page.WaitForSelectorAsync(selector, new WaitForSelectorOptions
-        {
-            Timeout = Timeout,
-            Visible = true
-        });
+        var handle =
+            await page.WaitForSelectorAsync(selector, new WaitForSelectorOptions { Timeout = Timeout, Visible = true });
 
         if (handle is null)
             throw new NotFoundException($"Expected element not found: '{selector}'.");
@@ -142,13 +151,32 @@ public sealed class PuppeteerService : IPuppeteerService
         return handle;
     }
 
-    private async Task<string> ScreenshotAsync(IPage page, string prefix, CancellationToken ct)
+    private static async Task<ElementHandlesDisposable> QuerySelectorAllAsync(IPage page, string selector,
+        CancellationToken ct)
     {
-        if (!env.IsDevelopment())
-        {
-            return string.Empty;
-        }
-        var dir = _settings.ScreenShotsDir;
+        var handles = await page.QuerySelectorAllAsync(selector) ?? Array.Empty<IElementHandle>();
+        if (handles is null)
+            throw new NotFoundException($"Expected element not found: '{selector}'.");
+
+        return new ElementHandlesDisposable(handles);
+    }
+
+    private static async Task WaitForSelectorToShowAsync(IPage page, string selector, CancellationToken ct)
+    {
+        await using var handle = await WaitForSelectorAsync(page, selector, ct);
+    }
+
+    private async Task<string> TakeScreenshotAsync(IPage page, string prefix, CancellationToken ct)
+    {
+        // We want to take screenshots, both in the development environment and production (conditionaly) as well
+        // if (!this._env.IsDevelopment())
+        // {
+        //     return string.Empty;
+        // }
+
+        // Build date-based subfolder name (UTC) like "20250902"
+        var dateFolderName = DateTime.UtcNow.ToString("yyyyMMdd");
+        var dir = Path.Combine(_settings.ScreenShotsDir, dateFolderName);
         Directory.CreateDirectory(dir);
         var id = new TimeSpan(DateTime.UtcNow.Ticks).Ticks.ToString();
         var fullPath = Path.Combine(dir, $"screenshot-{prefix}-{id}.png");
@@ -158,18 +186,20 @@ public sealed class PuppeteerService : IPuppeteerService
 
     private static async Task<string?> GetInnerTextAsync(IElementHandle element)
     {
-        var prop = await element.GetPropertyAsync("textContent");
+        await using var prop = await element.GetPropertyAsync("textContent");
         return await prop.JsonValueAsync<string>();
     }
 
     private async Task<int> MarketOverviewReadyAsync(IPage page, int requiredCount, CancellationToken ct)
     {
         // Ensure a table root is mounted
-        await WaitForSelectorAsync(page, MarketOverviewTableReadySelector, ct);
-        await WaitForSelectorAsync(page, MarketOverviewColumnReadySelector, ct); // checking if Last column is visible
+        await WaitForSelectorToShowAsync(page, MarketOverviewTableReadySelector, ct);
+        await WaitForSelectorToShowAsync(page, MarketOverviewColumnReadySelector,
+            ct); // checking if Last column is visible
 
         // Count currently rendered rows matching the required class pattern (ag-Grid is virtualized)
-        var renderedRows = await page.QuerySelectorAllAsync(MarketOverviewRowBaseSelector);
+        await using var disposable = await QuerySelectorAllAsync(page, MarketOverviewRowBaseSelector, ct);
+        var renderedRows = disposable.Handles;
         if (renderedRows is null || renderedRows.Length == 0 || requiredCount > renderedRows.Length)
             return 0;
 
@@ -179,7 +209,7 @@ public sealed class PuppeteerService : IPuppeteerService
             if (validRowsCount >= requiredCount)
                 break;
 
-            var valueHandle = await row.QuerySelectorAsync(MarketOverviewNumericValueSelector);
+            await using var valueHandle = await row.QuerySelectorAsync(MarketOverviewNumericValueSelector);
             if (valueHandle is null)
                 continue;
 

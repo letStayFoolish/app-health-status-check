@@ -5,7 +5,8 @@ public interface IJobCleanupService
     /// <summary>
     /// Cleans up stale jobs older than specified date
     /// </summary>
-    /// <param name="olderThan"></param>
+    /// <param name="successfulTestsOlderThan"></param>
+    /// <param name="failedTestsOlderThan"></param>
     /// <returns></returns>
-    public Task CleanupAsync(DateTime olderThan);
+    public Task CleanupAsync(DateTime successfulTestsOlderThan, DateTime failedTestsOlderThan);
 }

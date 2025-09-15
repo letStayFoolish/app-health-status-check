@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics;
-using System.Text.Json;
 using DeepCheck.Data;
 using DeepCheck.DTOs;
 using DeepCheck.Entities;
@@ -45,6 +44,18 @@ public class TestRepository : ITestRepository
         return response.Select(x =>
                 MapToTestRunInfo(x, tests.First(t => t.TestDefinition.TestName == x.TestName).TestDefinition))
             .ToList();
+    }
+
+    public async Task<IEnumerable<FailedTestInfo>> GetFailedTestRunsAsync(CancellationToken cancellationToken)
+    {
+        var response = await this._dbContext.TestRuns
+            .AsNoTracking()
+            .Include(tr => tr.Steps)
+            .Where(tr => tr.Steps.Any(ts =>
+                ts.Status == LastRunStatusEnum.Failed && !string.IsNullOrWhiteSpace(ts.FailReason)))
+            .ToListAsync(cancellationToken);
+
+        return response.Select(tr => MapToFailedTestInfo(tr)).ToList();
     }
 
     public async Task<IEnumerable<TestStepRunInfo>> GetTestStepsAsync(CancellationToken cancellationToken = default)
@@ -124,14 +135,14 @@ public class TestRepository : ITestRepository
         return MapToTestStepRunInfo(step, def);
     }
 
-    public async Task<UptimeTestRunInfo> GetUptimeTestRunInfoAsync(int countPerTestStepName, CancellationToken cancellationToken = default)
+    public async Task<UptimeTestRunInfo> GetUptimeTestRunInfoAsync(int countPerTestStepName,
+        CancellationToken cancellationToken = default)
     {
         IReadOnlyDictionary<string, IReadOnlyList<TestRunStep>> testSteps = await _dbContext.TestRunSteps
             .GroupBy(s => s.TestStepName)
             .Select(g => new
             {
-                g.Key,
-                Items = g.OrderByDescending(s => s.StartedAt).Take(countPerTestStepName).ToList()
+                g.Key, Items = g.OrderByDescending(s => s.StartedAt).Take(countPerTestStepName).ToList()
             })
             // optionally choose which groups to include:
             .ToDictionaryAsync(x => x.Key, x => (IReadOnlyList<TestRunStep>)x.Items, cancellationToken);
@@ -139,27 +150,62 @@ public class TestRepository : ITestRepository
         return new UptimeTestRunInfo { Steps = testSteps };
     }
 
-    public async Task RemoveOldTestRunsAsync(DateTime olderThan, CancellationToken cancellationToken = default)
+    public async Task RemoveOldSuccessfulTestRunsAsync(DateTime olderThan,
+        CancellationToken cancellationToken = default)
     {
-        using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            var oldTestRuns = await _dbContext.TestRuns
+            var oldSuccessfulRuns = await this._dbContext.TestRuns
                 .Where(tr => tr.StartedAt.AddMilliseconds(tr.ElapsedMs) < olderThan)
+                .Where(tr => tr.Steps.All(ts => ts.Status == LastRunStatusEnum.Ok))
                 .ToListAsync(cancellationToken);
 
-            if (oldTestRuns.Any())
+            if (oldSuccessfulRuns.Count > 0)
             {
-                var oldTestRunIds = oldTestRuns.Select(tr => tr.Id).ToList();
+                var oldTestRunIds = oldSuccessfulRuns.Select(tr => tr.Id).ToList();
 
-                var oldSteps = await _dbContext.TestRunSteps
-                    .Where(s => oldTestRunIds.Contains(s.TestRunId))
+                var stepsToDelete
+                    = await this._dbContext.TestRunSteps
+                        .Where(ts => oldTestRunIds.Contains(ts.TestRunId))
+                        .ToListAsync(cancellationToken);
+
+                this._dbContext.TestRunSteps.RemoveRange(stepsToDelete);
+                this._dbContext.TestRuns.RemoveRange(oldSuccessfulRuns);
+
+                await this._dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task RemoveOldFailedTestRunsAsync(DateTime olderThan, CancellationToken cancellationToken = default)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var oldFailedRuns = await this._dbContext.TestRuns
+                .Where(tr => tr.StartedAt.AddMilliseconds(tr.ElapsedMs) < olderThan)
+                // .Where(tr => tr.Steps.Any(ts => ts.Status == LastRunStatusEnum.Failed))
+                .ToListAsync(cancellationToken);
+
+            if (oldFailedRuns.Count > 0)
+            {
+                var oldFailedTestRunIds = oldFailedRuns.Select(tr => tr.Id).ToList();
+
+                var stepsToDelete = await this._dbContext.TestRunSteps
+                    .Where(s => oldFailedTestRunIds.Contains(s.TestRunId))
                     .ToListAsync(cancellationToken);
 
-                _dbContext.TestRunSteps.RemoveRange(oldSteps);
-                _dbContext.TestRuns.RemoveRange(oldTestRuns);
+                this._dbContext.TestRunSteps.RemoveRange(stepsToDelete);
+                this._dbContext.TestRuns.RemoveRange(oldFailedRuns);
 
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                await this._dbContext.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
             }
         }
@@ -182,6 +228,20 @@ public class TestRepository : ITestRepository
         };
     }
 
+    private FailedTestInfo MapToFailedTestInfo(TestRun testRun)
+    {
+        return new FailedTestInfo
+        {
+            TestId = testRun.Id,
+            TestName = testRun.TestName,
+            StartedAt = testRun.StartedAt,
+            ElapsedMs = testRun.ElapsedMs,
+            FailReason = testRun.Steps
+                .Where(s => s.Status == LastRunStatusEnum.Failed)
+                .Select(s => s.FailReason)
+                .FirstOrDefault(r => !string.IsNullOrWhiteSpace(r))
+        };
+    }
     private static TestStepRunInfo MapToTestStepRunInfo(TestRunStep testStep, TestStepDefinition testStepDefinition)
     {
         return new TestStepRunInfo

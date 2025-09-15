@@ -45,9 +45,10 @@ public class BackgroundJobSchedulerHostedService : IHostedService
         }
 
         var now = DateTime.UtcNow;
-        var cleanupTime = now.AddHours(-this.cleanUpsettings.OlderThanInHours);
+        var successTestsCleanupTime = now.AddHours(-this.cleanUpsettings.SuccessTestsOlderThanInHours);
+        var failedTestsCleanupTime = now.AddDays(-this.cleanUpsettings.FailedTestsOlderThanInDays);
 
-        this.jobManager.AddOrUpdate<IJobCleanupService>("cleanup-job", service => service.CleanupAsync(cleanupTime), this.cleanUpsettings.CronExpression);
+        this.jobManager.AddOrUpdate<IJobCleanupService>("cleanup-job", service => service.CleanupAsync(successTestsCleanupTime, failedTestsCleanupTime), this.cleanUpsettings.CronExpression);
         return Task.CompletedTask;
     }
 
